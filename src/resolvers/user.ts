@@ -1,7 +1,6 @@
 import {
     Resolver,
     Mutation,
-    InputType,
     Field,
     Arg,
     Ctx,
@@ -12,14 +11,10 @@ import argon2 from 'argon2';
 
 import { User } from '../entities/User';
 import { MyContext } from 'src/types';
-
-@InputType()
-class UsernamePasswordInput {
-    @Field(() => String)
-    username: string;
-    @Field(() => String)
-    password: string;
-}
+import {
+    UsernamePasswordInput,
+    validateRegister,
+} from '../utils/validateRegister';
 
 @ObjectType()
 class FieldError {
@@ -50,31 +45,18 @@ export class UserResolver {
     }
 
     @Mutation(() => UserResponse)
-    async signUp(
+    async register(
         @Arg('options') options: UsernamePasswordInput,
         @Ctx() { em, req }: MyContext
     ): Promise<UserResponse> {
-        if (options.username.length <= 2) {
-            return {
-                errors: [
-                    {
-                        field: 'username',
-                        message: 'Invalid username',
-                    },
-                ],
-            };
+        const errors = validateRegister(options);
+        console.log(errors);
+
+        if (errors) {
+            return { errors };
         }
-        if (options.password.length <= 5) {
-            return {
-                errors: [
-                    {
-                        field: 'username',
-                        message: 'Invalid password',
-                    },
-                ],
-            };
-        }
-        const user = em.findOne(User, { username: options.username });
+
+        const user = await em.findOne(User, { username: options.username });
         if (user) {
             return {
                 errors: [
@@ -87,18 +69,22 @@ export class UserResolver {
         }
         const hashPassword = await argon2.hash(options.password);
         const newUser = em.create(User, {
-            username: options.username.toLowerCase(),
+            username: options.username,
             password: hashPassword,
         });
-        await em.persistAndFlush(user);
+        await em.persistAndFlush(newUser);
         req.session.userId = newUser.id;
         return {
-            user: newUser,
+            user: {
+                ...newUser,
+                createdAt: newUser.createdAt,
+                updatedAt: newUser.updatedAt,
+            },
         };
     }
 
     @Mutation(() => UserResponse)
-    async signIn(
+    async login(
         @Arg('options') options: UsernamePasswordInput,
         @Ctx() { em, req }: MyContext
     ): Promise<UserResponse> {
