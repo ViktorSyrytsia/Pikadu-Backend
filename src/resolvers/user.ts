@@ -52,7 +52,7 @@ export class UserResolver {
     @Mutation(() => UserResponse)
     async signUp(
         @Arg('options') options: UsernamePasswordInput,
-        @Ctx() { em }: MyContext
+        @Ctx() { em, req }: MyContext
     ): Promise<UserResponse> {
         if (options.username.length <= 2) {
             return {
@@ -91,6 +91,7 @@ export class UserResolver {
             password: hashPassword,
         });
         await em.persistAndFlush(user);
+        req.session.userId = newUser.id;
         return {
             user: newUser,
         };
