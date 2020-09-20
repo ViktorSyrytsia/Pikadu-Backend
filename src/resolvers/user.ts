@@ -8,6 +8,7 @@ import {
     Query,
 } from 'type-graphql';
 import argon2 from 'argon2';
+import { v4 } from 'uuid';
 
 import { User } from '../entities/User';
 import { MyContext } from 'src/types';
@@ -15,9 +16,10 @@ import {
     UsernamePasswordInput,
     validateRegister,
 } from '../utils/validateRegister';
+import { sendEmail } from '../utils/sendEmail';
 
 @ObjectType()
-class FieldError {
+export class FieldError {
     @Field()
     field: string;
     @Field()
@@ -25,7 +27,7 @@ class FieldError {
 }
 
 @ObjectType()
-class UserResponse {
+export class UserResponse {
     @Field(() => [FieldError], { nullable: true })
     errors?: FieldError[];
 
@@ -44,15 +46,45 @@ export class UserResolver {
         return user;
     }
 
+    @Mutation(() => Boolean)
+    async forgotPassword(
+        @Arg('email') email: string,
+        @Ctx() { em, redis }: MyContext
+    ): Promise<Boolean> {
+        const user = await em.findOne(User, { email });
+        if (!user) {
+            return true;
+            // return {
+            //     errors: [
+            //         {
+            //             field: 'username',
+            //             message: "This username doesn't exist",
+            //         },
+            //     ],
+            // };
+        }
+        const token = v4();
+        await redis.set(
+            'forget-password:' + token,
+            user.id,
+            'ex',
+            1000 * 60 * 60 * 24
+        );
+        sendEmail(
+            email,
+            'Password recovery',
+            `<a href='http://localhost:3000/change-password/${token}'>Reset password</a>`
+        );
+        return true;
+    }
+
     @Mutation(() => UserResponse)
     async register(
         @Arg('options') options: UsernamePasswordInput,
         @Ctx() { em, req }: MyContext
     ): Promise<UserResponse> {
         const errors = validateRegister(options);
-        console.log(errors);
-
-        if (errors) {
+        if (errors.length > 0) {
             return { errors };
         }
 
@@ -71,6 +103,7 @@ export class UserResolver {
         const newUser = em.create(User, {
             username: options.username,
             password: hashPassword,
+            email: options.email,
         });
         await em.persistAndFlush(newUser);
         req.session.userId = newUser.id;
@@ -85,23 +118,27 @@ export class UserResolver {
 
     @Mutation(() => UserResponse)
     async login(
-        @Arg('options') options: UsernamePasswordInput,
+        @Arg('usernameOrEmail') usernameOrEmail: string,
+        @Arg('password') password: string,
         @Ctx() { em, req }: MyContext
     ): Promise<UserResponse> {
-        const user = await em.findOne(User, {
-            username: options.username.toLowerCase(),
-        });
+        const user = await em.findOne(
+            User,
+            usernameOrEmail.includes('@')
+                ? { email: usernameOrEmail }
+                : { username: usernameOrEmail }
+        );
         if (!user) {
             return {
                 errors: [
                     {
-                        field: 'username',
+                        field: 'usernameOrEmail',
                         message: "This username doesn't exist",
                     },
                 ],
             };
         }
-        const valid = await argon2.verify(user.password, options.password);
+        const valid = await argon2.verify(user.password, password);
         if (!valid) {
             return {
                 errors: [
@@ -116,5 +153,19 @@ export class UserResolver {
         return {
             user,
         };
+    }
+    @Mutation(() => Boolean)
+    logout(@Ctx() { req, res }: MyContext) {
+        return new Promise((resolve) =>
+            req.session.destroy((err) => {
+                res.clearCookie('qid');
+                if (err) {
+                    console.log(err);
+                    resolve(false);
+                    return;
+                }
+                resolve(true);
+            })
+        );
     }
 }

@@ -3,7 +3,7 @@ import { MikroORM } from '@mikro-orm/core';
 import express from 'express';
 import { ApolloServer } from 'apollo-server-express';
 import { buildSchema } from 'type-graphql';
-import redis from 'redis';
+import Redis from 'ioredis';
 import session from 'express-session';
 import conncetRedis from 'connect-redis';
 import cors from 'cors';
@@ -21,12 +21,12 @@ const main = async () => {
     app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
 
     const RedisStore = conncetRedis(session);
-    const redisClient = redis.createClient();
+    const redis = Redis();
 
     app.use(
         session({
             name: 'qid',
-            store: new RedisStore({ client: redisClient, disableTouch: true }),
+            store: new RedisStore({ client: redis, disableTouch: true }),
             secret: 'secret',
             saveUninitialized: false,
             resave: false,
@@ -44,7 +44,7 @@ const main = async () => {
             resolvers: [PostResolver, UserResolver],
             validate: false,
         }),
-        context: ({ req, res }) => ({ em: orm.em, req, res }),
+        context: ({ req, res }) => ({ em: orm.em, req, res, redis }),
     });
 
     apolloServer.applyMiddleware({
