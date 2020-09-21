@@ -22,14 +22,14 @@ const main = async () => {
         password: 'mypass',
         logging: true,
         synchronize: true,
-        entities: [Post, User],
+        entities: [User, Post],
     });
 
     const app = express();
     app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
 
     const RedisStore = conncetRedis(session);
-    const redis = Redis();
+    const redis = new Redis();
 
     app.use(
         session({
